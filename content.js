@@ -16,7 +16,7 @@
 
   // ── Configuration ────────────────────────────────────────────────────────────
   const BACKEND_URL = "https://YOUR_NGROK_URL"; // Replace with your ngrok URL
-  const WHATSAPP_NUMBER = "1234567890"; // Replace with verification WhatsApp number
+  const WHATSAPP_DISPLAY_NUMBER = "+919924024265"; // Displayed to receiver
   const MAX_POLL_ATTEMPTS = 30;
   const POLL_INTERVAL_MS = 2000;
 
@@ -141,7 +141,7 @@
         "display:block;width:100%;margin:12px 0 0;padding:10px;" +
           "background:#25d366;color:#fff;border:none;border-radius:4px;" +
           "font-size:14px;font-weight:600;cursor:pointer;",
-        "📱 Verify via WhatsApp"
+        `📱 Send Code to ${WHATSAPP_DISPLAY_NUMBER} via WhatsApp`
       );
       waBtn.id = "gas-whatsapp-btn";
 
@@ -195,33 +195,55 @@
       let polling = false;
 
       // WhatsApp button
-      card.querySelector("#gas-whatsapp-btn").addEventListener("click", () => {
-        const msg = encodeURIComponent(
-          `Gmail Anti-Spoof Verification\nCode: ${code}\nEmail: ${recipientEmail}`
-        );
-        window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${msg}`, "_blank");
+      card.querySelector("#gas-whatsapp-btn").addEventListener("click", async () => {
+        const waBtnEl = card.querySelector("#gas-whatsapp-btn");
+        if (waBtnEl.dataset.sending) return;
+        waBtnEl.dataset.sending = "true";
+        waBtnEl.disabled = true;
+        waBtnEl.textContent = "⏳ Sending…";
 
-        // Start polling for backend confirmation
-        if (!polling) {
-          polling = true;
-          const statusEl = document.createElement("p");
-          statusEl.style.cssText =
-            "font-size:12px;color:#1a73e8;margin:8px 0 0;";
-          statusEl.textContent =
-            "⏳ Waiting for WhatsApp verification…";
-          card.querySelector("#gas-whatsapp-btn").after(statusEl);
+        const statusEl = document.createElement("p");
+        statusEl.style.cssText = "font-size:12px;color:#1a73e8;margin:8px 0 0;";
+        waBtnEl.after(statusEl);
 
-          pollVerification(recipientEmail, code).then((verified) => {
-            if (verified) {
-              backdrop.remove();
-              resolve(true);
-            } else {
-              statusEl.textContent =
-                "⏰ Verification timed out. Please try again.";
-              statusEl.style.color = "#d93025";
-              polling = false;
-            }
+        try {
+          const res = await fetch(`${BACKEND_URL}/send_verification_code`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code, recipient_email: recipientEmail }),
           });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || `Server error ${res.status}`);
+          }
+
+          waBtnEl.textContent = `✅ Code sent to ${WHATSAPP_DISPLAY_NUMBER}`;
+          waBtnEl.style.background = "#34a853";
+          statusEl.textContent =
+            `Code sent to ${WHATSAPP_DISPLAY_NUMBER} ✅ — waiting for WhatsApp confirmation…`;
+
+          // Start polling for backend confirmation
+          if (!polling) {
+            polling = true;
+            pollVerification(recipientEmail, code).then((verified) => {
+              if (verified) {
+                backdrop.remove();
+                resolve(true);
+              } else {
+                statusEl.textContent =
+                  "⏰ Verification timed out. Please enter the code manually below.";
+                statusEl.style.color = "#d93025";
+                polling = false;
+              }
+            });
+          }
+        } catch (err) {
+          waBtnEl.textContent = `📱 Send Code to ${WHATSAPP_DISPLAY_NUMBER} via WhatsApp`;
+          waBtnEl.disabled = false;
+          delete waBtnEl.dataset.sending;
+          statusEl.textContent = `❌ Error: ${err.message}`;
+          statusEl.style.color = "#d93025";
         }
       });
 
